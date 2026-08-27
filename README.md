@@ -15,7 +15,9 @@ Automated monthly collection of badge recipients from subproject repos. Produces
 /
 ├── config.json                  # Source definitions
 ├── issued-badges.json           # State: previously issued badges
-├── generate-credly-csv.js       # Main script (Node 22, ESM, no deps)
+├── generate-credly-csv.js       # Main script (Node 24, ESM, no deps)
+├── scripts/seed-issued-badges.js # One-time seeding helper (Credly export -> state)
+├── scripts/diff-issued-vs-csv.js # Verification helper (state vs CSV diff)
 ├── package.json                 # { "type": "module" } for ESM
 ├── .github/workflows/credly.yml # Scheduled workflow
 └── README.md
@@ -63,17 +65,12 @@ Before the first automated run, seed from Credly historical exports:
 ]
 ```
 
-Quick conversion helper (Node):
+Run the seeding helper (handles BOM, CRLF, quoted fields, header detection, and merges with existing state):
 
-```js
-import fs from 'node:fs';
-// credly-export.csv has header: Badge Template ID,Recipient Email,...
-const rows = fs.readFileSync('credly-export.csv','utf8').split('\n').slice(1);
-const records = rows.filter(l=>l.trim()).map(l=>{
-  const [templateId,email] = l.split(','); // adapt to actual Credly export columns
-  return { email: email.toLowerCase().trim(), badgeTemplateId: templateId.trim(), issuedDate: '2026-05-01' };
-});
-fs.writeFileSync('issued-badges.json', JSON.stringify(records,null,2)+'\n');
+```bash
+node scripts/seed-issued-badges.js credly-export.csv
+# or: node scripts/seed-issued-badges.js credly-export.csv issued-badges.json --date 2026-05-01
+# see: node scripts/seed-issued-badges.js --help
 ```
 
 4. Commit and push `issued-badges.json` before enabling the schedule. Verify count matches Credly.
@@ -129,7 +126,7 @@ If no new recipients, no CSV is produced (logs show `No new recipients`) and sta
 
 ## Local Development
 
-Requires Node 22+:
+Requires Node 24+:
 
 ```bash
 node generate-credly-csv.js
@@ -138,6 +135,34 @@ GH_TOKEN=ghp_xxx node generate-credly-csv.js
 ```
 
 Logs: summary to `stdout`, warnings/errors to `stderr`. Exit 1 if any source fetch failed (CSV still emitted for others).
+
+## Verification
+
+Compare `issued-badges.json` against any CSV to audit what would be issued or what is missing. Handles BOM, CRLF, RFC 4180 quoted fields, and lowercases emails. Auto-detects Credly export vs source recipients format.
+
+**Credly export vs state** (should be 0 diff after seeding):
+
+```bash
+node scripts/diff-issued-vs-csv.js ~/Downloads/credly-export.csv
+# CSV: 341, State: 341, Only in CSV: 0, Only in state: 0
+```
+
+**Source recipients CSV vs state** (requires `--template`):
+
+```bash
+node scripts/diff-issued-vs-csv.js badges/recipients.csv --template 605608ea-8467-43a4-9236-715ceb0edbf4
+# Only in CSV (would be issued next run): 1
+#   + newperson@example.com -> 605608ea-8467-43a4-9236-715ceb0edbf4
+```
+
+**Options:**
+
+```bash
+node scripts/diff-issued-vs-csv.js <csv> --state ./my-state.json --template <id> --json
+node scripts/diff-issued-vs-csv.js --help
+```
+
+`--json` prints machine-readable `{counts, onlyInCsv, onlyInState, inBoth}` sorted by email. Use `--state` to compare against a different state file.
 
 ## Troubleshooting
 
