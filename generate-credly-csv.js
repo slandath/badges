@@ -339,6 +339,11 @@ async function main() {
       throw e;
     }
 
+    console.log(`[source] ${label}: fetched ${rows.length} data rows (dialect: ${dialect}${perRowBadgeIdx !== -1 ? ', per-row badge' : ''})`);
+
+    let newForSource = 0;
+    let skippedForSource = 0;
+
     for (let idx = 0; idx < rows.length; idx++) {
       const row = rows[idx];
       const lineNumber = idx + 2; // +1 for header, +1 for 1-indexed
@@ -348,6 +353,7 @@ async function main() {
       if (dialect === 'contributors') {
         if (row.length < 4) {
           console.warn(`[validate] ${label}:${lineNumber} skipped - expected >=4 columns, got ${row.length}`);
+          skippedForSource++;
           continue;
         }
         emailRaw = row[0].trim();
@@ -356,6 +362,7 @@ async function main() {
       } else if (dialect === 'name-email') {
         if (row.length < 2) {
           console.warn(`[validate] ${label}:${lineNumber} skipped - expected >=2 columns, got ${row.length}`);
+          skippedForSource++;
           continue;
         }
         const name = row[0].trim();
@@ -368,6 +375,7 @@ async function main() {
       } else {
         if (row.length < 4) {
           console.warn(`[validate] ${label}:${lineNumber} skipped - expected >=4 columns, got ${row.length}`);
+          skippedForSource++;
           continue;
         }
         firstName = row[0].trim();
@@ -378,14 +386,17 @@ async function main() {
 
       if (!firstName) {
         console.warn(`[validate] ${label}:${lineNumber} skipped - First Name is empty`);
+        skippedForSource++;
         continue;
       }
       if (!lastName) {
         console.warn(`[validate] ${label}:${lineNumber} skipped - Last Name is empty`);
+        skippedForSource++;
         continue;
       }
       if (!EMAIL_REGEX.test(email)) {
         console.warn(`[validate] ${label}:${lineNumber} skipped - invalid email "${emailRaw}"`);
+        skippedForSource++;
         continue;
       }
 
@@ -396,6 +407,7 @@ async function main() {
         const perRowVal = row.length > perRowBadgeIdx ? row[perRowBadgeIdx].trim() : '';
         if (!perRowVal) {
           console.warn(`[validate] ${label}:${lineNumber} skipped - Badge Template ID not specified per row (repo "${source.repo}" has multiple badges, no default)`);
+          skippedForSource++;
           continue;
         }
         badgeTemplateId = perRowVal;
@@ -406,6 +418,7 @@ async function main() {
       const pool = config.pools[source.repo];
       if (!pool.includes(badgeTemplateId)) {
         console.warn(`[validate] ${label}:${lineNumber} skipped - badgeTemplateId "${badgeTemplateId}" not in pools["${source.repo}"]`);
+        skippedForSource++;
         continue;
       }
 
@@ -417,6 +430,7 @@ async function main() {
         continue;
       }
       seenInRun.add(key);
+      newForSource++;
       newRecipients.push({
         email,
         badgeTemplateId,
@@ -424,6 +438,7 @@ async function main() {
         lastName,
       });
     }
+    console.log(`[source] ${label}: ${newForSource} new, ${skippedForSource} skipped, ${rows.length - newForSource - skippedForSource} already issued/duplicates`);
   }
 
   // Summary logging

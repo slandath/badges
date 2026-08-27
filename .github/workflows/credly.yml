@@ -30,7 +30,7 @@ jobs:
           GH_TOKEN: ${{ secrets.BADGE_READ_TOKEN }}
 
       - name: Upload Credly CSV artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: credly-csv
           path: credly-*.csv
