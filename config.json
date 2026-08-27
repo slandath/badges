@@ -24,6 +24,12 @@
       "path": "CONTRIBUTORS.csv",
       "branch": "main",
       "badgeTemplateId": "9cbdc4ec-7b33-4287-b0d9-299ba011a16e"
+    },
+    {
+      "repo": "openmainframeproject/mentorships",
+      "path": "COMMITTERS.csv",
+      "branch": "main",
+      "badgeTemplateId": "605608ea-8467-43a4-9236-715ceb0edbf4"
     }
   ]
 }
