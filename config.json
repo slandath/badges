@@ -5,6 +5,12 @@
       "path": "COMMITTERS.csv",
       "branch": "master",
       "badgeTemplateId": "77a85d06-d4d9-4233-b487-4c4945bd748c"
+    },
+    {
+      "repo": "genevaers/community",
+      "path": "COMMITTERS.csv",
+      "branch": "master",
+      "badgeTemplateId": "999225bd-bf23-4e74-9cfa-203abf84a1ba"
     }
   ]
 }
