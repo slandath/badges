@@ -1,16 +1,10 @@
 {
   "sources": [
     {
-      "repo": "org/subproject-a",
-      "path": "badges/recipients.csv",
-      "branch": "main",
-      "badgeTemplateId": "abc-123-def"
-    },
-    {
-      "repo": "org/subproject-b",
-      "path": "badges/recipients.csv",
-      "branch": "main",
-      "badgeTemplateId": "xyz-789-ghi"
+      "repo": "zowe/community",
+      "path": "COMMITTERS.csv",
+      "branch": "master",
+      "badgeTemplateId": "77a85d06-d4d9-4233-b487-4c4945bd748c"
     }
   ]
 }
