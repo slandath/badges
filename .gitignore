@@ -1,0 +1,18 @@
+# Generated Credly CSVs (downloaded as workflow artifacts)
+credly-*.csv
+
+# State backup on corrupt JSON
+issued-badges.json.bak.*
+
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.*
+
+# macOS
+.DS_Store
+
+# Logs
+npm-debug.log*

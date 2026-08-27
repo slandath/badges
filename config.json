@@ -1,0 +1,16 @@
+{
+  "sources": [
+    {
+      "repo": "org/subproject-a",
+      "path": "badges/recipients.csv",
+      "branch": "main",
+      "badgeTemplateId": "abc-123-def"
+    },
+    {
+      "repo": "org/subproject-b",
+      "path": "badges/recipients.csv",
+      "branch": "main",
+      "badgeTemplateId": "xyz-789-ghi"
+    }
+  ]
+}
