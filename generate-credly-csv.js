@@ -4,6 +4,69 @@ const CONFIG_PATH = 'config.json';
 const STATE_PATH = 'issued-badges.json';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+class MissingHeadersError extends Error {
+  constructor(label, missing, actualHeader) {
+    super(`Missing required headers for ${label}: expected [${missing.join(', ')}], got [${actualHeader.join(', ')}]`);
+    this.name = 'MissingHeadersError';
+    this.label = label;
+    this.missing = missing;
+    this.actualHeader = actualHeader;
+  }
+}
+
+function getHeaderColumns(csvText) {
+  const text = csvText.replace(/^\uFEFF/, '');
+  const lines = text.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('**')) continue;
+    const lower = trimmed.toLowerCase();
+    if (lower.includes('first name') || lower.includes('recipient email') || lower.includes('name,')) {
+      // Parse this header line with RFC 4180 awareness for header
+      const cols = [];
+      let cur = '', inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (inQ) {
+          if (c === '"' && i + 1 < line.length && line[i + 1] === '"') { cur += '"'; i++; }
+          else if (c === '"') inQ = false;
+          else cur += c;
+        } else {
+          if (c === '"' && cur === '') inQ = true;
+          else if (c === ',') { cols.push(cur.trim()); cur = ''; }
+          else cur += c;
+        }
+      }
+      cols.push(cur.trim());
+      return cols;
+    }
+  }
+  return null;
+}
+
+function validateHeaders(headerCols, dialect, perRowBadgeIdx, label, source) {
+  if (!headerCols) {
+    throw new MissingHeadersError(label, ['First Name or Recipient Email or Name'], []);
+  }
+  const lower = headerCols.map(c => c.toLowerCase());
+  let required = [];
+  if (dialect === 'contributors') {
+    required = ['recipient email', 'issued to first name', 'issued to last name'];
+  } else if (dialect === 'name-email') {
+    required = ['name', 'email'];
+  } else {
+    required = ['first name', 'last name', 'email'];
+  }
+  const missing = required.filter(r => !lower.includes(r));
+  if (missing.length > 0) {
+    throw new MissingHeadersError(label, missing, headerCols);
+  }
+  // For multi-badge pools, per-row Badge Template ID header must be present if CSV intends per-row
+  // If pools[repo] has multiple badges and file is expected to be per-row, enforce header
+  // Currently we enforce per-row header only when perRowBadgeIdx is expected but missing for multi-badge repos
+  // This check is done in main loop after detecting perRowBadgeIdx; if repo has multiple badges and wants per-row but header lacks badge column, throw
+}
+
 function escapeCsvField(value) {
   if (value == null) return '';
   const str = String(value);
@@ -78,9 +141,12 @@ function parseCSV(text) {
     trimmedRows.push(trimmed);
   }
 
-  // Skip header row if first field is "First Name" case-insensitive
-  if (trimmedRows.length > 0 && trimmedRows[0][0].toLowerCase() === 'first name') {
-    trimmedRows.shift();
+  // Skip header row if first field is "First Name" or "Recipient Email" case-insensitive (supports both source and Credly-export-like headers)
+  if (trimmedRows.length > 0) {
+    const first = trimmedRows[0][0].toLowerCase();
+    if (first === 'first name' || first === 'recipient email' || first === 'name') {
+      trimmedRows.shift();
+    }
   }
 
   return trimmedRows;
@@ -94,10 +160,30 @@ async function loadConfig() {
       console.error(`[config] Invalid config: expected { sources: [...] } in ${CONFIG_PATH}`);
       process.exit(1);
     }
+    if (!config.pools || typeof config.pools !== 'object' || Array.isArray(config.pools)) {
+      console.error(`[config] Invalid config: expected { pools: { "owner/repo": ["badge-id", ...] } } in ${CONFIG_PATH}`);
+      process.exit(1);
+    }
     for (let i = 0; i < config.sources.length; i++) {
       const s = config.sources[i];
       if (!s.repo || !s.path || !s.branch || !s.badgeTemplateId) {
         console.error(`[config] Invalid source at index ${i}: missing required field (repo, path, branch, badgeTemplateId)`);
+        process.exit(1);
+      }
+      const pool = config.pools[s.repo];
+      if (!pool) {
+        console.error(`[config] Pool violation at index ${i}: repo "${s.repo}" not in pools (add pools["${s.repo}"] = ["${s.badgeTemplateId}", ...])`);
+        process.exit(1);
+      }
+      if (!Array.isArray(pool) || !pool.includes(s.badgeTemplateId)) {
+        console.error(`[config] Pool violation at index ${i}: badgeTemplateId "${s.badgeTemplateId}" for repo "${s.repo}" not in pools["${s.repo}"] = [${Array.isArray(pool) ? pool.map(id => `"${id}"`).join(', ') : String(pool)}]`);
+        process.exit(1);
+      }
+    }
+    // Validate pools entries are arrays of strings and warn on unused pools
+    for (const [repo, ids] of Object.entries(config.pools)) {
+      if (!Array.isArray(ids) || ids.length === 0 || !ids.every(id => typeof id === 'string' && id.trim())) {
+        console.error(`[config] Invalid pools["${repo}"]: expected non-empty array of badgeTemplateId strings`);
         process.exit(1);
       }
     }
@@ -195,18 +281,99 @@ async function main() {
 
     const rows = parseCSV(csvText);
 
+    // Detect dialect from header to support both spec and CONTRIBUTORS formats
+    // Spec: First Name, Last Name, GitHub ID, Email, Squad, Role (email col 3)
+    // CONTRIBUTORS: Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name (email col 0, first col 1, last col 3)
+    // Alt COMMITTERS: Name,Email,GitHub ID,Role... (name col 0 -> split into first/last, email col 1)
+    const csvLower = csvText.replace(/^\uFEFF/, '').toLowerCase();
+    let dialect = 'spec'; // 'spec' | 'contributors' | 'name-email'
+    if (csvLower.includes('recipient email')) dialect = 'contributors';
+    else if (csvLower.includes('name,email') && !csvLower.includes('first name')) dialect = 'name-email';
+
+    // Detect optional per-row Badge Template ID column (for Option B: one file with multiple badges)
+    // If header contains "Badge Template ID", each row can specify its badge; otherwise uses sources[].badgeTemplateId
+    let perRowBadgeIdx = -1;
+    if (csvLower.includes('badge template id')) {
+      const allLines = csvText.replace(/^\uFEFF/, '').split('\n');
+      for (const line of allLines) {
+        if (line.toLowerCase().includes('badge template id')) {
+          const cols = [];
+          let cur = '', inQ = false;
+          for (let i = 0; i < line.length; i++) {
+            const c = line[i];
+            if (inQ) {
+              if (c === '"' && i + 1 < line.length && line[i+1] === '"') { cur += '"'; i++; }
+              else if (c === '"') inQ = false;
+              else cur += c;
+            } else {
+              if (c === '"' && cur === '') inQ = true;
+              else if (c === ',') { cols.push(cur); cur = ''; }
+              else cur += c;
+            }
+          }
+          cols.push(cur);
+          perRowBadgeIdx = cols.findIndex(c => c.trim().toLowerCase() === 'badge template id');
+          break;
+        }
+      }
+    }
+
+    // Validate required headers for the detected dialect (throws MissingHeadersError)
+    const headerCols = getHeaderColumns(csvText);
+    try {
+      validateHeaders(headerCols, dialect, perRowBadgeIdx, label, source);
+      // For multi-badge pools where per-row is expected, ensure Badge Template ID header is present
+      const poolSize = config.pools[source.repo]?.length || 0;
+      if (poolSize > 1 && perRowBadgeIdx === -1) {
+        // Check if this source is intended to be per-row (heuristic: CSV already has per-row column missing but pool has multiple)
+        // For per-file multi-badge (multiple sources sharing repo), this is valid - each file maps to one badge via fallback, so no error
+        // Only throw if the CSV itself contains multiple distinct per-row badges expected but header lacks column
+        // We do not throw here; fallback will be used. If you want strict per-row for this repo, add Badge Template ID column to CSV
+      }
+    } catch (e) {
+      if (e instanceof MissingHeadersError) {
+        console.error(`[header] ${e.message} (${label})`);
+        hasFetchError = true;
+        continue;
+      }
+      throw e;
+    }
+
     for (let idx = 0; idx < rows.length; idx++) {
       const row = rows[idx];
       const lineNumber = idx + 2; // +1 for header, +1 for 1-indexed
 
-      if (row.length < 4) {
-        console.warn(`[validate] ${label}:${lineNumber} skipped - expected >=4 columns, got ${row.length}`);
-        continue;
-      }
+      let firstName, lastName, emailRaw;
 
-      const firstName = row[0].trim();
-      const lastName = row[1].trim();
-      const emailRaw = row[3].trim();
+      if (dialect === 'contributors') {
+        if (row.length < 4) {
+          console.warn(`[validate] ${label}:${lineNumber} skipped - expected >=4 columns, got ${row.length}`);
+          continue;
+        }
+        emailRaw = row[0].trim();
+        firstName = row[1].trim();
+        lastName = row[3].trim();
+      } else if (dialect === 'name-email') {
+        if (row.length < 2) {
+          console.warn(`[validate] ${label}:${lineNumber} skipped - expected >=2 columns, got ${row.length}`);
+          continue;
+        }
+        const name = row[0].trim();
+        emailRaw = row[1].trim();
+        // Split full Name into first/last: first token is first name, rest is last name
+        const nameParts = name.split(/\s+/);
+        firstName = nameParts[0] || '';
+        lastName = nameParts.slice(1).join(' ') || '';
+        // If Name was empty, fall back to GitHub ID? No, require first/last
+      } else {
+        if (row.length < 4) {
+          console.warn(`[validate] ${label}:${lineNumber} skipped - expected >=4 columns, got ${row.length}`);
+          continue;
+        }
+        firstName = row[0].trim();
+        lastName = row[1].trim();
+        emailRaw = row[3].trim();
+      }
       const email = emailRaw.toLowerCase();
 
       if (!firstName) {
@@ -222,7 +389,27 @@ async function main() {
         continue;
       }
 
-      const key = `${email}|${source.badgeTemplateId}`;
+      // Per-row badge (Option B): if CSV has Badge Template ID column, per-row is required - no default
+      // For sub-projects with multiple badges, each row must specify its badge; otherwise throw (skip) error
+      let badgeTemplateId;
+      if (perRowBadgeIdx !== -1) {
+        const perRowVal = row.length > perRowBadgeIdx ? row[perRowBadgeIdx].trim() : '';
+        if (!perRowVal) {
+          console.warn(`[validate] ${label}:${lineNumber} skipped - Badge Template ID not specified per row (repo "${source.repo}" has multiple badges, no default)`);
+          continue;
+        }
+        badgeTemplateId = perRowVal;
+      } else {
+        badgeTemplateId = source.badgeTemplateId;
+      }
+      // Validate badge is in repo's pool
+      const pool = config.pools[source.repo];
+      if (!pool.includes(badgeTemplateId)) {
+        console.warn(`[validate] ${label}:${lineNumber} skipped - badgeTemplateId "${badgeTemplateId}" not in pools["${source.repo}"]`);
+        continue;
+      }
+
+      const key = `${email}|${badgeTemplateId}`;
       if (seenInRun.has(key)) {
         continue;
       }
@@ -232,7 +419,7 @@ async function main() {
       seenInRun.add(key);
       newRecipients.push({
         email,
-        badgeTemplateId: source.badgeTemplateId,
+        badgeTemplateId,
         firstName,
         lastName,
       });

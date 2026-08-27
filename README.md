@@ -77,12 +77,18 @@ node scripts/seed-issued-badges.js credly-export.csv
 
 If you skip this, the first run will generate a CSV with the entire historical list.
 
-### 3. Add a New Badge Source
+### 3. Add a New Badge Source (and Badge Pools)
+
+`config.json` has top-level `pools` — per-repo allowed badge templates. Each `sources[].badgeTemplateId` must be in `pools[repo]`; this enforces that a subproject can only distribute badges from its own pool (see `SPEC.md:40`). For a subproject distributing multiple badges, add *multiple* `sources` entries sharing the same `repo` but with different `path`/`badgeTemplateId`, all validated against the same `pools[repo]`.
 
 Edit `config.json` and commit:
 
 ```json
 {
+  "pools": {
+    "org/subproject-a": ["abc-123-def"],
+    "org/new-project": ["new-template-id-1", "new-template-id-2"]
+  },
   "sources": [
     {
       "repo": "org/subproject-a",
@@ -92,18 +98,25 @@ Edit `config.json` and commit:
     },
     {
       "repo": "org/new-project",
-      "path": "badges/recipients.csv",
+      "path": "badges/recipients-a.csv",
       "branch": "main",
-      "badgeTemplateId": "new-template-id-from-credly"
+      "badgeTemplateId": "new-template-id-1"
+    },
+    {
+      "repo": "org/new-project",
+      "path": "badges/recipients-b.csv",
+      "branch": "main",
+      "badgeTemplateId": "new-template-id-2"
     }
   ]
 }
 ```
 
+- `pools`: `owner/name` → array of allowed Credly badge template IDs for that subproject (required, every `repo` in `sources` must have an entry)
 - `repo`: `owner/name` exactly
-- `path`: path to CSV within source repo (usually `badges/recipients.csv`)
-- `branch`: branch to fetch from (usually `main`)
-- `badgeTemplateId`: Credly badge template ID (found in Credly URL when viewing template)
+- `path`: path to CSV within source repo (usually `badges/recipients.csv` or `COMMITTERS.csv` at root)
+- `branch`: branch to fetch from (usually `main` or `master` — check the repo's default branch)
+- `badgeTemplateId`: Credly badge template ID (found in Credly URL when viewing template) — must be in `pools[repo]`, otherwise the run fails fast with `[config] Pool violation` to `stderr` and `exit 1`. If the CSV itself has a `Badge Template ID` column (case-insensitive), per-row value is **required with no default** — a row with empty per-row badge is skipped with `[validate] Badge Template ID not specified per row` to `stderr` and must also be in `pools[repo]`; otherwise the fallback `sources[].badgeTemplateId` applies (for single-badge files or multi-file per-badge setups).
 
 After adding, ensure `BADGE_READ_TOKEN` has Contents: Read on the new repo (edit fine-grained token -> Select repositories -> add new repo -> Regenerate token -> update secret). Test with manual workflow dispatch.
 
@@ -113,6 +126,15 @@ Provide the template CSV to the subproject team:
 First Name,Last Name,GitHub ID,Email,Squad,Role
 ```
 Only `First Name`, `Last Name`, `Email` are used; whitespace is trimmed; quoted fields with commas/quotes are handled per RFC 4180.
+
+**For a 3-badge pool where one person earns multiple badges (e.g., `openmainframeproject/omp-education`):** Add a `Badge Template ID` column as the last column — when this column is present, per-row is **required with no default** (empty per-row → skipped with `Badge Template ID not specified per row` warning) and must still be in `pools[repo]`. Example for John Doe earning 2 badges from the pool:
+
+```csv
+Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name,Badge Template ID
+john.doe@example.com,John,,Doe,9cbdc4ec-7b33-4287-b0d9-299ba011a16e
+john.doe@example.com,John,,Doe,37bf4b27-ad43-4c78-a733-4f77b57b3d1b
+```
+Same `email` with different per-row IDs yields two output rows (`email|template` dedup key per `SPEC.md:130`). Without the `Badge Template ID` column, each file maps to its `sources[].badgeTemplateId` fallback — use multiple `sources` entries for multiple files as shown above.
 
 ## Monthly Routine
 

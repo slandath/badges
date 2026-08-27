@@ -1,4 +1,11 @@
 {
+  "pools": {
+    "zowe/community": ["77a85d06-d4d9-4233-b487-4c4945bd748c"],
+    "genevaers/community": ["999225bd-bf23-4e74-9cfa-203abf84a1ba"],
+    "openmainframeproject/omp-education": ["9cbdc4ec-7b33-4287-b0d9-299ba011a16e", "37bf4b27-ad43-4c78-a733-4f77b57b3d1b", "3da2fb3e-d9ea-49ac-a280-29bed7103157"],
+    "zopencommunity/meta": ["26cf854c-c0a2-42ce-bb55-993f86915b93", "759552bd-c5d9-477a-bd35-f3498d1a956f"],
+    "openmainframeproject/mentorships": ["605608ea-8467-43a4-9236-715ceb0edbf4", "e495816c-8320-48d0-8bd1-78457baf4b98"]
+  },
   "sources": [
     {
       "repo": "zowe/community",
@@ -11,6 +18,12 @@
       "path": "COMMITTERS.csv",
       "branch": "master",
       "badgeTemplateId": "999225bd-bf23-4e74-9cfa-203abf84a1ba"
+    },
+    {
+      "repo": "openmainframeproject/omp-education",
+      "path": "CONTRIBUTORS.csv",
+      "branch": "main",
+      "badgeTemplateId": "9cbdc4ec-7b33-4287-b0d9-299ba011a16e"
     }
   ]
 }

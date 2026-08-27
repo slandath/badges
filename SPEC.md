@@ -40,10 +40,14 @@ A scheduled automation that collects badge recipient lists from multiple GitHub 
 
 ### 1. Config file: `config.json`
 
-Defines the source files to fetch. Each source maps one CSV file to one Credly badge template ID.
+Defines the source files to fetch. Each source maps one CSV file to one Credly badge template ID. Top-level `pools` declares per-subproject badge pools — not all subprojects can distribute all badges; each subproject creates its own pool.
 
 ```json
 {
+  "pools": {
+    "org/subproject-a": ["abc-123-def"],
+    "zowe/community": ["77a85d06-d4d9-4233-b487-4c4945bd748c", "e6ea521f-a438-48bb-8ba1-14cfff579a9a"]
+  },
   "sources": [
     {
       "repo": "org/subproject-a",
@@ -57,12 +61,15 @@ Defines the source files to fetch. Each source maps one CSV file to one Credly b
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `pools` | object | yes | Map `repo` (`owner/name`) → array of allowed Credly badge template IDs for that subproject's pool |
 | `repo` | string | yes | GitHub `owner/name` |
 | `path` | string | yes | Path to CSV file within the repo |
 | `branch` | string | yes | Branch to fetch from |
-| `badgeTemplateId` | string | yes | Credly badge template ID applied to every recipient in this file |
+| `badgeTemplateId` | string | yes | Credly badge template ID applied to every recipient in this file — must be in `pools[repo]`; if CSV has a `Badge Template ID` column, per-row value overrides this fallback but must also be in `pools[repo]` |
 
-Expected scale: 7–10 sources.
+A subproject distributing multiple badges uses multiple `sources` entries with the same `repo` but different `path` and/or `badgeTemplateId`, each `badgeTemplateId` validated against the repo's pool. `pools` is required; every `repo` in `sources` must have an entry in `pools`.
+
+Expected scale: 7–10 sources, 3–5 pools.
 
 ### 2. Source recipient CSVs (fetched from remote repos)
 
@@ -82,13 +89,14 @@ Parsing rules:
 - Normalize line endings: handle both `LF` (`\n`) and `CRLF` (`\r\n`); strip `\r`
 - Strip UTF-8 BOM (`\uFEFF`) if present at start of file
 - Split on newlines; trim each line; skip empty lines
-- Skip the header row (case-insensitive match on a line starting with `First Name` after trimming/BOM removal)
+- Skip the header row (case-insensitive match on first field `First Name`, `Recipient Email`, or `Name` after trimming/BOM removal)
 - Parse rows per RFC 4180: support quoted fields, commas inside quotes, escaped quotes (`""` -> `"`), and newlines inside quotes. Do not use naive `split(',')`
 - After RFC 4180 unquoting, trim every field
 - Rows are append-only over time; files contain the full historical list, not just new entrants
 - Trailing fields (Squad, Role) may be empty or absent
+- **Optional per-row badge (for multi-badge pools):** If header contains `Badge Template ID` (case-insensitive), each row's badge is taken from that column (`row[badgeCol]` trimmed) and must be in `pools[repo]`; no default is used — a row with empty per-row badge is skipped with `stderr` warning `Badge Template ID not specified per row (repo has multiple badges, no default)`. Otherwise the source's `badgeTemplateId` applies to every row. A CSV with a `Badge Template ID` column can award different badges per row from the same file (e.g., John Doe → two rows with `9cbdc...` and `37bf...` for `openmainframeproject/omp-education`). For sub-projects with multiple badges, per-row is required when the column is present.
 
-Only First Name, Last Name, and Email are used in the output. GitHub ID, Squad, and Role are ignored.
+Only First Name, Last Name, and Email are used in the output (plus optional per-row `Badge Template ID`). GitHub ID, Squad, and Role are ignored. Dialects supported: `First Name, Last Name, GitHub ID, Email, Squad, Role` (spec), `Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name` (contributors), and `Name,Email,GitHub ID,Role...` (alternative committers).
 
 ### 3. State file: `issued-badges.json`
 
@@ -111,13 +119,16 @@ JSON array of previously issued records:
 
 ## Processing Logic
 
-1. Load `config.json` and `issued-badges.json`
-2. For each source: fetch the CSV, parse recipients per RFC 4180 rules above, tag each with the source's `badgeTemplateId`
+1. Load `config.json` and `issued-badges.json` and validate `pools`
+   - `pools` must be an object; every `repo` in `sources` must have an entry in `pools`
+   - `sources[].badgeTemplateId` must be in `pools[repo]`; otherwise log an error to `stderr` with the offending `repo` and `badgeTemplateId` and exit 1 before any fetch (pool violation — subproject cannot distribute that badge)
+2. For each source: fetch the CSV, validate required headers for the detected dialect (see `MissingHeadersError` below) — if header is missing required columns (`spec` requires `First Name, Last Name, Email`; `contributors` requires `Recipient Email, Issued To First Name, Issued To Last Name`; `name-email` requires `Name, Email`), log an error to `stderr` `[header] Missing required headers for <label>: expected [...], got [...]`, skip that source, and set nonzero exit code at the end; otherwise parse recipients per RFC 4180 rules above, tag each with per-row `Badge Template ID` if the CSV header contains that column (e.g., `Recipient Email,Issued To First Name,...,Badge Template ID`) else the source's `badgeTemplateId`; when per-row column is present, per-row is required with no default — empty per-row badge is skipped with `stderr` warning `Badge Template ID not specified per row`, and per-row badges are validated against `pools[repo]` per row
 3. **Validation** (per row, after trim+unquoting):
-   - Row must have ≥ 4 columns; otherwise log a warning to `stderr` with source label and line number, skip row
+   - Row must have ≥ 4 columns for `spec`/`contributors` dialects or ≥ 2 for `Name,Email` dialect; otherwise log a warning to `stderr` with source label and line number, skip row
    - `First Name` must be non-empty; otherwise log a warning to `stderr` with source label and line number, skip row (Credly rejects empty names)
    - `Last Name` must be non-empty; otherwise log a warning to `stderr` with source label and line number, skip row (Credly rejects empty names)
    - Email must match `^[^\s@]+@[^\s@]+\.[^\s@]+$` after trim and lowercasing; otherwise log a warning to `stderr`, skip row
+   - If CSV has `Badge Template ID` column, per-row badge must be present and in `pools[repo]`; if empty, log a warning to `stderr` `Badge Template ID not specified per row (repo has multiple badges, no default)` and skip row; if not in `pools[repo]`, log a warning to `stderr` with source label, line number, and offending badge, skip row
 4. **Deduplication:** dedupe key is `lowercase(trimmed(email)) + "|" + badgeTemplateId`
    - Drop duplicates within the current run (first occurrence wins)
    - Drop any key present in the state file
@@ -128,6 +139,7 @@ JSON array of previously issued records:
 ### Error handling
 
 - A failed fetch (non-2xx or network error) for any source: log an error to `stderr`, continue processing remaining sources, and set a nonzero exit code at the end so the workflow run is marked failed — but still emit the CSV/state for the sources that succeeded
+- A CSV missing required headers for its dialect (`MissingHeadersError`): log an error to `stderr` `[header] Missing required headers for <label>: expected [...], got [...]`, skip that source, and set nonzero exit code at the end — but still process remaining sources and emit CSV/state for those that succeeded
 - Log a per-run summary to `stdout`: count of new recipients and each `email -> badgeTemplateId` pair (emails are public and used in commit signatures, so logging is permitted)
 
 ## Output
@@ -181,6 +193,9 @@ File: `.github/workflows/credly.yml`
 7. Missing state file is treated as empty with a warning to `stderr`, not an error; corrupt state file is backed up to `.bak.<timestamp>`, logged as error to `stderr`, and treated as empty for the run
 8. Whitespace around fields (e.g., `" Zowe API Squad"`) is trimmed after RFC 4180 unquoting; quoted commas and escaped quotes (`""`) are handled correctly
 9. The workflow commits the updated state file and exposes the CSV as a downloadable artifact; re-runs on same date overwrite the CSV
+10. A source with `badgeTemplateId` not in `pools[repo]` fails fast with error to `stderr` and exit 1; a subproject distributing multiple badges uses multiple `sources` entries sharing `repo` but with different `badgeTemplateId` values each in its pool
+11. A CSV with a `Badge Template ID` column awards per-row badges: John Doe appearing as two rows with `9cbdc...` and `37bf...` (both in `pools[openmainframeproject/omp-education]`) yields two output rows; a per-row badge not in `pools[repo]` is skipped with `stderr` warning
+12. A CSV missing required headers for its dialect (`spec` requires `First Name, Last Name, Email`; `contributors` requires `Recipient Email, Issued To First Name, Issued To Last Name`; `name-email` requires `Name, Email`) throws `MissingHeadersError`, logs `[header] Missing required headers...` to `stderr`, skips that source, and sets nonzero exit code — but still processes remaining sources
 
 ## Documentation Requirements (README)
 
