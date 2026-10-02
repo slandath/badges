@@ -154,7 +154,7 @@ Badge Template ID,Recipient Email,Issued To First Name,Issued To Middle Name,Iss
 
 - One row per new (email, badge template) pair
 - `Issued To Middle Name` is always empty
-- `Issued At` is the run date in `YYYY-MM-DD` format (UTC, via `new Date().toISOString().slice(0,10)`)
+- `Issued At` is the run date in `MM/DD/YYYY` format (UTC, zero-padded, per Credly bulk-upload spec); state `issuedDate` and filename date remain `YYYY-MM-DD`
 - CSV escaping: quote fields containing commas, quotes, or newlines per RFC 4180; double embedded quotes
 - File ends with a trailing newline
 - If the workflow runs multiple times on the same date, the file is overwritten on disk and the artifact is replaced
@@ -208,4 +208,3 @@ File: `.github/workflows/credly.yml`
 
 - Replace manual upload with per-recipient Credly API calls (`POST /organizations/{org_id}/badges`)
 - Slack/email notification with run summary
-- Verify `Issued At` date format against Credly's accepted formats if uploads fail

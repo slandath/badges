@@ -453,7 +453,10 @@ async function main() {
     console.log(`${r.email} -> ${r.badgeTemplateId}`);
   }
 
-  const issuedAt = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const issuedAtISO = now.toISOString().slice(0, 10);
+  // Credly bulk-upload expects Issued At as MM/DD/YYYY (UTC); state + filename stay ISO.
+  const issuedAtCredly = `${String(now.getUTCMonth() + 1).padStart(2, '0')}/${String(now.getUTCDate()).padStart(2, '0')}/${now.getUTCFullYear()}`;
   const csvHeader = 'Badge Template ID,Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name,Issued At';
   const csvLines = [csvHeader];
   for (const r of newRecipients) {
@@ -463,12 +466,12 @@ async function main() {
       escapeCsvField(r.firstName),
       escapeCsvField(''), // Middle Name always empty
       escapeCsvField(r.lastName),
-      escapeCsvField(issuedAt),
+      escapeCsvField(issuedAtCredly),
     ];
     csvLines.push(cols.join(','));
   }
   const csvContent = csvLines.join('\n') + '\n';
-  const csvPath = `credly-${issuedAt}.csv`;
+  const csvPath = `credly-${issuedAtISO}.csv`;
 
   await fs.writeFile(csvPath, csvContent, 'utf8');
   console.log(`Wrote ${csvPath}`);
@@ -477,7 +480,7 @@ async function main() {
   const newStateRecords = newRecipients.map(r => ({
     email: r.email,
     badgeTemplateId: r.badgeTemplateId,
-    issuedDate: issuedAt,
+    issuedDate: issuedAtISO,
   }));
   const updatedState = [...stateRecords, ...newStateRecords];
   const stateContent = JSON.stringify(updatedState, null, 2) + '\n';
