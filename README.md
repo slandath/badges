@@ -141,7 +141,7 @@ Same `email` with different per-row IDs yields two output rows (`email|template`
 1. **Check run:** Actions tab -> Credly Badge CSV -> latest run on 1st of month should be green. If orange (partial fetch failure), check logs for `[fetch] Failed` but artifact is still valid for successful sources.
 2. **Download artifact:** Click successful run -> Artifacts -> `credly-csv` -> downloads zip containing `credly-YYYY-MM-DD.csv`
 3. **Review:** Open CSV, verify row count and `email -> badgeTemplateId` pairs in logs. Check warnings in logs for `[validate]` skipped rows (fix source files for next month).
-4. **Upload to Credly:** Credly Organization -> Badges -> Bulk Issue -> Upload CSV (or per-template bulk upload). The CSV header is exactly Credly's `Badge Template ID,Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name,Issued At`; `Issued At` is UTC `YYYY-MM-DD`; fields with commas/quotes are quoted per RFC 4180.
+4. **Upload to Credly:** Credly Organization -> Badges -> Bulk Issue -> Upload CSV (or per-template bulk upload). The CSV header is exactly Credly's `Badge Template ID,Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name,Issued At`; `Issued At` is UTC `MM/DD/YYYY` (zero-padded, per Credly bulk-upload spec); fields with commas/quotes are quoted per RFC 4180.
 5. **Verify state:** After run, `issued-badges.json` is auto-committed as `github-actions[bot]`. Confirm push succeeded (no concurrency conflict).
 
 If no new recipients, no CSV is produced (logs show `No new recipients`) and state is unchanged.
