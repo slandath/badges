@@ -146,15 +146,16 @@ JSON array of previously issued records:
 
 ### Credly CSV: `credly-YYYY-MM-DD.csv`
 
-Exact header (order matters):
+Exact header (order matters, per Credly bulk-import template):
 
 ```text
-Badge Template ID,Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name,Issued At
+Badge Template ID,Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name,Issued At,Expires at,Issuer Earner ID,Evidence Name,Evidence URL,URL Evidence Description,Text Evidence Title,Text Evidence Description,Id Evidence Title,Id Evidence Description,Locale
 ```
 
 - One row per new (email, badge template) pair
 - `Issued To Middle Name` is always empty
 - `Issued At` is the run date in `MM/DD/YYYY` format (UTC, zero-padded, per Credly bulk-upload spec); state `issuedDate` and filename date remain `YYYY-MM-DD`
+- The 10 trailing columns — `Expires at`, `Issuer Earner ID`, `Evidence Name`, `Evidence URL`, `URL Evidence Description`, `Text Evidence Title`, `Text Evidence Description`, `Id Evidence Title`, `Id Evidence Description`, `Locale` — are required by Credly's bulk-import template and are always written empty. Row and header must have identical field counts (16) or Credly rejects the import; populate values manually in the CSV before uploading if needed
 - CSV escaping: quote fields containing commas, quotes, or newlines per RFC 4180; double embedded quotes
 - File ends with a trailing newline
 - If the workflow runs multiple times on the same date, the file is overwritten on disk and the artifact is replaced

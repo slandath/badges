@@ -457,7 +457,10 @@ async function main() {
   const issuedAtISO = now.toISOString().slice(0, 10);
   // Credly bulk-upload expects Issued At as MM/DD/YYYY (UTC); state + filename stay ISO.
   const issuedAtCredly = `${String(now.getUTCMonth() + 1).padStart(2, '0')}/${String(now.getUTCDate()).padStart(2, '0')}/${now.getUTCFullYear()}`;
-  const csvHeader = 'Badge Template ID,Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name,Issued At';
+  // Credly requires these exact headers (order matters) for template acceptance.
+  // The trailing 10 columns (Expires at … Locale) are intentionally left blank —
+  // see SPEC.md "Output" section.
+  const csvHeader = 'Badge Template ID,Recipient Email,Issued To First Name,Issued To Middle Name,Issued To Last Name,Issued At,Expires at,Issuer Earner ID,Evidence Name,Evidence URL,URL Evidence Description,Text Evidence Title,Text Evidence Description,Id Evidence Title,Id Evidence Description,Locale';
   const csvLines = [csvHeader];
   for (const r of newRecipients) {
     const cols = [
@@ -467,6 +470,16 @@ async function main() {
       escapeCsvField(''), // Middle Name always empty
       escapeCsvField(r.lastName),
       escapeCsvField(issuedAtCredly),
+      escapeCsvField(''), // Expires at
+      escapeCsvField(''), // Issuer Earner ID
+      escapeCsvField(''), // Evidence Name
+      escapeCsvField(''), // Evidence URL
+      escapeCsvField(''), // URL Evidence Description
+      escapeCsvField(''), // Text Evidence Title
+      escapeCsvField(''), // Text Evidence Description
+      escapeCsvField(''), // Id Evidence Title
+      escapeCsvField(''), // Id Evidence Description
+      escapeCsvField(''), // Locale
     ];
     csvLines.push(cols.join(','));
   }
